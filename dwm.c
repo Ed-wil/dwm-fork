@@ -182,6 +182,7 @@ static void grabbuttons(Client *c, int focused);
 static void grabkeys(void);
 static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
+static void keyrelease(XEvent *e);
 static void killclient(const Arg *arg);
 static void manage(Window w, XWindowAttributes *wa);
 static void mappingnotify(XEvent *e);
@@ -217,6 +218,7 @@ static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
 static void tile(Monitor *m);
 static void togglebar(const Arg *arg);
+static void holdbar(const Arg *arg);
 static void togglefloating(const Arg *arg);
 static void toggletag(const Arg *arg);
 static void toggleview(const Arg *arg);
@@ -224,6 +226,7 @@ static void unfocus(Client *c, int setfocus);
 static void unmanage(Client *c, int destroyed);
 static void unmapnotify(XEvent *e);
 static void updatebarpos(Monitor *m);
+static void updateholdbarpos(Monitor *m);
 static void updatebars(void);
 static void updateclientlist(void);
 static int updategeom(void);
@@ -254,6 +257,7 @@ static int (*xerrorxlib)(Display *, XErrorEvent *);
 static unsigned int numlockmask = 0;
 static void (*handler[LASTEvent]) (XEvent *) = {
 	[ButtonPress] = buttonpress,
+	[ButtonRelease] = keyrelease,
 	[ClientMessage] = clientmessage,
 	[ConfigureRequest] = configurerequest,
 	[ConfigureNotify] = configurenotify,
@@ -261,6 +265,7 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[EnterNotify] = enternotify,
 	[Expose] = expose,
 	[FocusIn] = focusin,
+	[KeyRelease] = keyrelease,
 	[KeyPress] = keypress,
 	[MappingNotify] = mappingnotify,
 	[MapRequest] = maprequest,
@@ -289,10 +294,55 @@ struct Pertag {
 	int showbars[LENGTH(tags) + 1]; /* display bar for the current tag */
 };
 
+
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
 
 /* function implementations */
+void
+holdbar(const Arg *arg)
+{
+	if (selmon->showbar)
+		return;
+	selmon->showbar = 2;
+	updateholdbarpos(selmon);
+	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
+}
+
+void
+keyrelease(XEvent *e)
+{
+	if (XEventsQueued(dpy, QueuedAfterReading)) {
+		XEvent ne;
+		XPeekEvent(dpy, &ne);
+
+		if (ne.type == KeyPress && ne.xkey.time == e->xkey.time &&
+				ne.xkey.keycode == e->xkey.keycode) {
+			XNextEvent(dpy, &ne);
+			return;
+		}
+	}
+	if (e->xkey.keycode == XKeysymToKeycode(dpy, HOLDKEY) && selmon->showbar == 2) {
+		selmon->showbar = 0;
+		updateholdbarpos(selmon);
+		XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
+		arrange(selmon);
+	}
+}
+
+void
+updateholdbarpos(Monitor *m)
+{
+	m->wy = m->my;
+	m->wh = m->mh;
+	if (m->showbar) {
+		m->by = m->topbar ? m->wy : m->wy + m->wh - bh;
+		m->wy = m->topbar ? m->wy - bh + bh : m->wy;
+	} else {
+		m->by = -bh;
+	}
+}
+
 void
 applyrules(Client *c)
 {
@@ -682,10 +732,7 @@ createmon(void)
 		m->pertag->ltidxs[i][0] = m->lt[0];
 		m->pertag->ltidxs[i][1] = m->lt[1];
 		m->pertag->sellts[i] = m->sellt;
-
-		m->pertag->showbars[i] = m->showbar;
 	}
-
 	return m;
 }
 
@@ -1767,8 +1814,7 @@ tile(Monitor *m)
 void
 togglebar(const Arg *arg)
 {
-	selmon->showbar = selmon->pertag->showbars[selmon->pertag->curtag] = !selmon->showbar;
-	updatebarpos(selmon);
+        selmon->showbar = (selmon->showbar == 2 ? 1 : !selmon->showbar);	
 	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx + sp, selmon->by + vp, selmon->ww - 2 * sp, bh);
 	arrange(selmon);
 }
@@ -1806,30 +1852,28 @@ void
 toggleview(const Arg *arg)
 {
 	unsigned int newtagset = selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK);
-	int i;
-
+        int i;
 	if (newtagset) {
 		selmon->tagset[selmon->seltags] = newtagset;
-
-		if (newtagset == ~0) {
-			selmon->pertag->prevtag = selmon->pertag->curtag;
-			selmon->pertag->curtag = 0;
-		}
-
-		/* test if the user did not select the same tag */
-		if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
-			selmon->pertag->prevtag = selmon->pertag->curtag;
-			for (i = 0; !(newtagset & 1 << i); i++) ;
-			selmon->pertag->curtag = i + 1;
-		}
-
-		/* apply settings for this view */
-		selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
-		selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
-		selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
-		selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
-		selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
-
+  
+                if (newtagset == ~0) {
+                        selmon->pertag->prevtag = selmon->pertag->curtag;
+                        selmon->pertag->curtag = 0;
+                }
+ 
+                /* test if the user did not select the same tag */
+                if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
+                        selmon->pertag->prevtag = selmon->pertag->curtag;
+                        for (i = 0; !(newtagset & 1 << i); i++) ;
+                        selmon->pertag->curtag = i + 1;
+                }
+ 
+                /* apply settings for this view */
+                selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+                selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+                selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+                selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+                selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
 		if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
 			togglebar(NULL);
 
@@ -2129,33 +2173,33 @@ updatewmhints(Client *c)
 void
 view(const Arg *arg)
 {
-	int i;
-	unsigned int tmptag;
+        int i;
+        unsigned int tmptag;
 
 	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
 		return;
 	selmon->seltags ^= 1; /* toggle sel tagset */
-	if (arg->ui & TAGMASK) {
+	if (arg->ui & TAGMASK) { 
 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
-		selmon->pertag->prevtag = selmon->pertag->curtag;
-
-		if (arg->ui == ~0)
-			selmon->pertag->curtag = 0;
-		else {
-			for (i = 0; !(arg->ui & 1 << i); i++) ;
-			selmon->pertag->curtag = i + 1;
-		}
-	} else {
-		tmptag = selmon->pertag->prevtag;
-		selmon->pertag->prevtag = selmon->pertag->curtag;
-		selmon->pertag->curtag = tmptag;
-	}
-
-	selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
-	selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
-	selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
-	selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
-	selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
+                selmon->pertag->prevtag = selmon->pertag->curtag;
+ 
+                if (arg->ui == ~0)
+                        selmon->pertag->curtag = 0;
+                else {
+                        for (i = 0; !(arg->ui & 1 << i); i++) ;
+                        selmon->pertag->curtag = i + 1;
+                }
+        } else {
+                tmptag = selmon->pertag->prevtag;
+                selmon->pertag->prevtag = selmon->pertag->curtag;
+                selmon->pertag->curtag = tmptag;
+        }
+ 
+        selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+        selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+        selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+        selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+        selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
 
 	if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
 		togglebar(NULL);
