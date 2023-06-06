@@ -251,8 +251,6 @@ static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
 static int bh;               /* bar height */
 static int lrpad;            /* sum of left and right padding for text */
-static int vp;               /* vertical padding for bar */
-static int sp;               /* side padding for bar */
 static int (*xerrorxlib)(Display *, XErrorEvent *);
 static unsigned int numlockmask = 0;
 static void (*handler[LASTEvent]) (XEvent *) = {
@@ -294,20 +292,20 @@ struct Pertag {
 	int showbars[LENGTH(tags) + 1]; /* display bar for the current tag */
 };
 
-
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
 
 /* function implementations */
+
+
 void
 holdbar(const Arg *arg)
 {
-	if (selmon->showbar)
-		return;
-	selmon->showbar = 2;
+	selmon->showbar = 1;
 	updateholdbarpos(selmon);
 	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
 }
+
 
 void
 keyrelease(XEvent *e)
@@ -322,7 +320,7 @@ keyrelease(XEvent *e)
 			return;
 		}
 	}
-	if (e->xkey.keycode == XKeysymToKeycode(dpy, HOLDKEY) && selmon->showbar == 2) {
+	if (e->xkey.keycode == XKeysymToKeycode(dpy, HOLDKEY)) {
 		selmon->showbar = 0;
 		updateholdbarpos(selmon);
 		XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
@@ -647,7 +645,7 @@ configurenotify(XEvent *e)
 				for (c = m->clients; c; c = c->next)
 					if (c->isfullscreen)
 						resizeclient(c, m->mx, m->my, m->mw, m->mh);
-				XMoveResizeWindow(dpy, m->barwin, m->wx + sp, m->by + vp, m->ww -  2 * sp, bh);
+				XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, m->ww, bh);
 			}
 			focus(NULL);
 			arrange(NULL);
@@ -732,7 +730,10 @@ createmon(void)
 		m->pertag->ltidxs[i][0] = m->lt[0];
 		m->pertag->ltidxs[i][1] = m->lt[1];
 		m->pertag->sellts[i] = m->sellt;
+
+		m->pertag->showbars[i] = m->showbar;
 	}
+
 	return m;
 }
 
@@ -827,7 +828,7 @@ drawbar(Monitor *m)
 	if (m == selmon) { /* status is only drawn on selected monitor */
 		drw_setscheme(drw, scheme[SchemeNorm]);
 		tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-		drw_text(drw, m->ww - tw - 2 * sp, 0, tw, bh, 0, stext, 0);
+		drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
 	}
 
 	for (c = m->clients; c; c = c->next) {
@@ -851,7 +852,9 @@ drawbar(Monitor *m)
 	x = drw_text(drw, x, 0, w, bh, lrpad / 2, m->ltsymbol, 0);
 
         if ((w = m->ww - tw - x) > bh) {
+                        drw_setscheme(drw, scheme[SchemeNorm]);
                        drw_rect(drw, x, 0, w, bh, 1, 1);
+		
 	}
 	drw_map(drw, m->barwin, 0, 0, m->ww, bh);
 }
@@ -1660,10 +1663,7 @@ setup(void)
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
 	bh = drw->fonts->h + 2;
-	sp = sidepad;
-	vp = (topbar == 1) ? vertpad : - vertpad;
 	updategeom();
-
 	/* init atoms */
 	utf8string = XInternAtom(dpy, "UTF8_STRING", False);
 	wmatom[WMProtocols] = XInternAtom(dpy, "WM_PROTOCOLS", False);
@@ -1814,8 +1814,9 @@ tile(Monitor *m)
 void
 togglebar(const Arg *arg)
 {
-        selmon->showbar = (selmon->showbar == 2 ? 1 : !selmon->showbar);	
-	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx + sp, selmon->by + vp, selmon->ww - 2 * sp, bh);
+	selmon->showbar = selmon->pertag->showbars[selmon->pertag->curtag] = !selmon->showbar;
+	updatebarpos(selmon);
+	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
 	arrange(selmon);
 }
 
@@ -1852,28 +1853,30 @@ void
 toggleview(const Arg *arg)
 {
 	unsigned int newtagset = selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK);
-        int i;
+	int i;
+
 	if (newtagset) {
 		selmon->tagset[selmon->seltags] = newtagset;
-  
-                if (newtagset == ~0) {
-                        selmon->pertag->prevtag = selmon->pertag->curtag;
-                        selmon->pertag->curtag = 0;
-                }
- 
-                /* test if the user did not select the same tag */
-                if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
-                        selmon->pertag->prevtag = selmon->pertag->curtag;
-                        for (i = 0; !(newtagset & 1 << i); i++) ;
-                        selmon->pertag->curtag = i + 1;
-                }
- 
-                /* apply settings for this view */
-                selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
-                selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
-                selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
-                selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
-                selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
+
+		if (newtagset == ~0) {
+			selmon->pertag->prevtag = selmon->pertag->curtag;
+			selmon->pertag->curtag = 0;
+		}
+
+		/* test if the user did not select the same tag */
+		if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
+			selmon->pertag->prevtag = selmon->pertag->curtag;
+			for (i = 0; !(newtagset & 1 << i); i++) ;
+			selmon->pertag->curtag = i + 1;
+		}
+
+		/* apply settings for this view */
+		selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+		selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+		selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+		selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+		selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
+
 		if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
 			togglebar(NULL);
 
@@ -1948,7 +1951,7 @@ updatebars(void)
 	for (m = mons; m; m = m->next) {
 		if (m->barwin)
 			continue;
-		m->barwin = XCreateWindow(dpy, root, m->wx + sp, m->by + vp, m->ww - 2 * sp, bh, 0, DefaultDepth(dpy, screen),
+		m->barwin = XCreateWindow(dpy, root, m->wx, m->by, m->ww, bh, 0, DefaultDepth(dpy, screen),
 				CopyFromParent, DefaultVisual(dpy, screen),
 				CWOverrideRedirect|CWBackPixmap|CWEventMask, &wa);
 		XDefineCursor(dpy, m->barwin, cursor[CurNormal]->cursor);
@@ -1963,11 +1966,11 @@ updatebarpos(Monitor *m)
 	m->wy = m->my;
 	m->wh = m->mh;
 	if (m->showbar) {
-		m->wh = m->wh - vertpad - bh;
-		m->by = m->topbar ? m->wy : m->wy + m->wh + vertpad;
-		m->wy = m->topbar ? m->wy + bh + vp : m->wy;
+		m->wh -= bh;
+		m->by = m->topbar ? m->wy : m->wy + m->wh;
+		m->wy = m->topbar ? m->wy + bh : m->wy;
 	} else
-		m->by = -bh - vp;
+		m->by = -bh;
 }
 
 void
@@ -2173,33 +2176,33 @@ updatewmhints(Client *c)
 void
 view(const Arg *arg)
 {
-        int i;
-        unsigned int tmptag;
+	int i;
+	unsigned int tmptag;
 
 	if ((arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
 		return;
 	selmon->seltags ^= 1; /* toggle sel tagset */
-	if (arg->ui & TAGMASK) { 
+	if (arg->ui & TAGMASK) {
 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
-                selmon->pertag->prevtag = selmon->pertag->curtag;
- 
-                if (arg->ui == ~0)
-                        selmon->pertag->curtag = 0;
-                else {
-                        for (i = 0; !(arg->ui & 1 << i); i++) ;
-                        selmon->pertag->curtag = i + 1;
-                }
-        } else {
-                tmptag = selmon->pertag->prevtag;
-                selmon->pertag->prevtag = selmon->pertag->curtag;
-                selmon->pertag->curtag = tmptag;
-        }
- 
-        selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
-        selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
-        selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
-        selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
-        selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
+		selmon->pertag->prevtag = selmon->pertag->curtag;
+
+		if (arg->ui == ~0)
+			selmon->pertag->curtag = 0;
+		else {
+			for (i = 0; !(arg->ui & 1 << i); i++) ;
+			selmon->pertag->curtag = i + 1;
+		}
+	} else {
+		tmptag = selmon->pertag->prevtag;
+		selmon->pertag->prevtag = selmon->pertag->curtag;
+		selmon->pertag->curtag = tmptag;
+	}
+
+	selmon->nmaster = selmon->pertag->nmasters[selmon->pertag->curtag];
+	selmon->mfact = selmon->pertag->mfacts[selmon->pertag->curtag];
+	selmon->sellt = selmon->pertag->sellts[selmon->pertag->curtag];
+	selmon->lt[selmon->sellt] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt];
+	selmon->lt[selmon->sellt^1] = selmon->pertag->ltidxs[selmon->pertag->curtag][selmon->sellt^1];
 
 	if (selmon->showbar != selmon->pertag->showbars[selmon->pertag->curtag])
 		togglebar(NULL);
