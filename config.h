@@ -4,6 +4,7 @@
 static const unsigned int borderpx  = 0;        /* border pixel of windows */
 static const unsigned int gappx     = 18;       /* gap pixel between windows */
 static const unsigned int snap      = 32;       /* snap pixel */
+static const int swallowfloating    = 1;        /* 1 means swallow floating windows by default */
 static const int showbar            = 1;        /* 0 means no bar */
 static const int topbar             = 1;        /* 0 means bottom bar */
 static const char *fonts[]          = { "terminus:size=16", "fontawesome:size=16" };
@@ -20,7 +21,7 @@ static const char *colors[][3]      = {
 };
 
 /* tagging */
-static const char *tags[] = { "", "", "", "", "", "" };
+static const char *tags[] = { "", "", "", "", "", "" };
 
 static const Rule rules[] = {
 	/* xprop(1):
@@ -28,8 +29,10 @@ static const Rule rules[] = {
 	 *	WM_NAME(STRING) = title
 	 */
 	/* class      instance    title       tags mask     isfloating   monitor */
-	{ "Gimp",     NULL,       NULL,       0,            1,           -1 },
-	{ "Firefox",  NULL,       NULL,       1 << 8,       0,           -1 },
+ 	{ "Gimp",    NULL,     NULL,           0,         1,          0,           0,        -1 },
+ 	{ "Firefox", NULL,     NULL,           1 << 8,    0,          0,          -1,        -1 },
+ 	{ "St",      NULL,     NULL,           0,         0,          1,           0,        -1 },
+ 	{ NULL,      NULL,     "Event Tester", 0,         0,          0,           1,        -1 }, /* xev */
 };
 
 /* layout(s) */
@@ -40,9 +43,9 @@ static const int lockfullscreen = 1; /* 1 will force focus on the fullscreen win
 
 static const Layout layouts[] = {
 	/* symbol     arrange function */
-        { "[D]",      deck },
-	{ "",      tile },    /* first entry is default */
-	{ "[M]",      monocle },
+	{ "",      tile },    /* first entry is default */
+        { "",      deck },
+	{ "",      monocle },
 	{ "><>",      NULL }, };   /* no layout function means floating behavior */
 /* key definitions */
 #define MODKEY Mod1Mask
@@ -94,13 +97,10 @@ static const Key keys[] = {
 	TAGKEYS(                        XK_4,                      3)
 	TAGKEYS(                        XK_5,                      4)
 	TAGKEYS(                        XK_6,                      5)
-	TAGKEYS(                        XK_7,                      6)
-	TAGKEYS(                        XK_8,                      7)
-	TAGKEYS(                        XK_9,                      8)
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
         { 0,             		HOLDKEY,      holdbar,           {0} },
 	{ 0,        			XK_Print,  spawn,       {.v = maimcmd } },
-	{ MODKEY,         		XK_Print,  spawn,    {.v = maimcpcmd } },
+	{ ControlMask,         	XK_Print,  spawn,    {.v = maimcpcmd } },
 
 };
 
